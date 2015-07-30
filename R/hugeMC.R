@@ -4,7 +4,7 @@
 
 huge.mc <- function (x, lambda = NULL, nlambda = NULL, lambda.min.ratio = NULL, 
           method = "mb", scr = NULL, scr.num = NULL, cov.output = FALSE, 
-          sym = "or", verbose = TRUE) 
+          sym = "or", verbose = TRUE, ncores = ncores) 
 {
   gcinfo(FALSE)
   est = list()
