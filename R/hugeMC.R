@@ -84,8 +84,7 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
     fit$cov = list()
   }
   out.glasso = NULL
-  fit1<-list()
-  lol<-mclapply( nlambda:1, function(i) {
+  fit.mc<-mclapply(nlambda:1, function(i) {
     fit1$sparsity<-0
     fit1$loglik<--d
     fit1$df<-0
@@ -172,7 +171,7 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
     return(fit1)
   }, mc.cores = num.cores)
   
-  fit.l<-do.call(Map, c(c, lol))
+  fit.l<-do.call(Map, c(c, fit.mc))
   fit$loglik<-rev(fit.l$loglik)
   fit$sparsity<-rev(fit.l$sparsity)
   fit$df<-rev(fit.l$df)
@@ -180,7 +179,7 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
   fit$icov<-rev(fit.l$icov)
   fit$cov<-rev(fit.l$cov)
   
-  #rm(S, out.glasso, tmp.cov, tmp.icov, fit.l, lol)
+  rm(S, out.glasso, fit.l, lol)
   gc()
   if (verbose) {
     cat("Conducting the graphical lasso (glasso)....done.                                          \r")
