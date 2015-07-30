@@ -99,8 +99,8 @@ sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE
   if (is.null(args$lambda.min.ratio)) args$lambda.min.ratio <- 1e-3
   
   if (method %in% c("glasso")) {
-    do.call(huge::huge, c(args, list(x=data, method=method, verbose=verbose, 
-                                     cov.output = cov.output)))
+    do.call(huge.mc, c(args, list(x=data, method=method, verbose=verbose, 
+                                     cov.output = cov.output, mc.cores = ncores)))
     
   } else if (method %in% c('mb')) {
     est <- do.call(huge::huge.mb, c(args, list(x=data, verbose=verbose)))
