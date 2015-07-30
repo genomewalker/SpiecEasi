@@ -26,7 +26,7 @@ spiec.easi.phyloseq <- function(obj, ...) {
 #' @method spiec.easi default
 #' @export
 spiec.easi.default <- function(data, method='glasso', sel.criterion='stars', verbose=TRUE, 
-                               icov.select=TRUE, icov.select.params=list(), ...) {
+                               icov.select=TRUE, ncores = 1, icov.select.params=list(), ...) {
   
   args <- list(...)
   if (verbose) message("Normalizing/clr transformation of data with pseudocount")
