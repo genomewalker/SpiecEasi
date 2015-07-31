@@ -22,6 +22,7 @@ spiec.easi.phyloseq <- function(obj, ...) {
 #' @param method estimation method to use as a character string. Currently either 'glasso' or 'mb' (meinshausen-buhlmann)
 #' @param sel.criterion character string specifying criterion/method for model selection accepts 'stars' [default], 'ric', 'ebic'
 #' @param icov.select.params list of further arguments to icov.select
+#' @param pseudocount integer specifying the pseudocount value. The default value is 1
 #' @param ... further arguments to sparseiCov
 #' @method spiec.easi default
 #' @export
