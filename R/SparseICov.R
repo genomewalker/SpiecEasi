@@ -26,17 +26,17 @@ spiec.easi.phyloseq <- function(obj, ...) {
 #' @method spiec.easi default
 #' @export
 spiec.easi.default <- function(data, method='glasso', sel.criterion='stars', verbose=TRUE, 
-                               icov.select=TRUE, ncores = 1, icov.select.params=list(), ...) {
+                               icov.select=TRUE, ncores = 1, pseudocount = 1, icov.select.params=list(), ...) {
   
   args <- list(...)
-  if (verbose) message("Normalizing/clr transformation of data with pseudocount")
-  data.clr <- t(clr(data+1, 1))
-  if (verbose) message(paste("Inverse Covariance Estimation with", method, "...", sep=" "))
-  est      <- do.call('sparseiCov', c(list(data=data.clr, method=method), args))
+  if (verbose) message("Normalizing/clr transformation of data with pseudocount...")
+  data.clr <- t(clr(data+pseudocount, 1))
+  if (verbose) message(paste("Inverse Covariance Estimation with ", method, "...", sep=""))
+  est      <- do.call('sparseiCov', c(list(data=data.clr, method=method, ncores=ncores), args))
   
   if (icov.select) {
-    if (verbose) message(paste("Model selection with", sel.criterion, "...", sep=" "))
-    est <- do.call('icov.select', c(list(est=est, criterion=sel.criterion), icov.select.params))
+    if (verbose) message(paste("Model selection with ", sel.criterion, "...", sep=""))
+    est <- do.call('icov.select', c(list(est=est, criterion=sel.criterion, ncores=ncores), icov.select.params))
     if (verbose) message("Done!")
   }
   return(est)
@@ -87,8 +87,7 @@ spiec.easi.default <- function(data, method='glasso', sel.criterion='stars', ver
 #'  image(as.matrix(est.log$path[[3]][1:5,1:5]))
 #'  image(as.matrix(est.clr$path[[3]][1:5,1:5]))
 #'  image(as.matrix(est.f$path[[3]][1:5,1:5]))
-sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE, ...) {
-  
+sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE, ncores = 1, nlamba, ...) {
   if (npn) data <- huge::huge.npn(data, verbose=verbose)
   
   args <- list(...)
@@ -97,10 +96,18 @@ sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE
                    stop("Method not supported"))
   
   if (is.null(args$lambda.min.ratio)) args$lambda.min.ratio <- 1e-3
+  # Avoid to run more processes than cores available
+  num.cores<-detectCores()
+  if (ncores > num.cores) {
+    ncores<-num.cores
+    message((paste("Note: Detected ", num.cores, " cores. Reduced the numbers of cores to ", ncores, ".", sep = "")))
+  }else{
+    message(paste("Using", num.cores, "cores."))
+  }
   
   if (method %in% c("glasso")) {
     do.call(huge.mc, c(args, list(x=data, method=method, verbose=verbose, 
-                                     cov.output = cov.output, mc.cores = ncores)))
+                                  cov.output = cov.output, ncores = ncores, mc.progress = TRUE)))
     
   } else if (method %in% c('mb')) {
     est <- do.call(huge::huge.mb, c(args, list(x=data, verbose=verbose)))
@@ -128,6 +135,29 @@ sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE
 #' @export
 icov.select <- function(est, criterion = 'stars', stars.thresh = 0.05, ebic.gamma = 0.5, 
                         stars.subsample.ratio = NULL, rep.num = 20, ncores=1, normfun=function(x) x, verbose=FALSE) {
+  # Balance cores to be used for stars and huge.glasso.mc
+  # Avoid to run more processes than cores available
+  num.cores<-detectCores()
+  if (ncores > num.cores) {
+    ncores<-num.cores
+    message((paste("Note: Detected ", num.cores, " cores. Reduced the numbers of cores to ", ncores, ".", sep = "")))
+  }else{
+    message(paste("Using", num.cores, "cores."))
+  }
+  
+  # Naively distribute the cores for the stars and glasso
+  if (ncores == 2){
+    s.ncores <- 1
+    g.ncores <- 2
+  }else if (ncores == 3){
+    s.ncores <- 1
+    g.ncores <- 3
+  }else{
+    s.ncores<-floor(sqrt(ncores))
+    g.ncores<-ceiling(sqrt(ncores))
+  }
+  message(paste("Using", s.ncores, "cores for stars selection and", g.ncores, "cores for glasso estimation."))
+  
   gcinfo(FALSE)
   if (est$cov.input) {
     cat("Model selection is not available when using the covariance matrix as input.")
@@ -177,13 +207,13 @@ icov.select <- function(est, criterion = 'stars', stars.thresh = 0.05, ebic.gamm
                               sym = est$sym, idx.mat = est$idx.mat, verbose = FALSE)$path[[1]]
         if (est$method == "glasso") {
           if (!is.null(est$cov)) {
-            tmp = huge.glasso(est$data, lambda = est$opt.lambda, 
-                              scr = est$scr, cov.output = TRUE, verbose = FALSE)
+            tmp = huge.glasso.mc(est$data, lambda = est$opt.lambda, 
+                                 scr = est$scr, cov.output = TRUE, verbose = FALSE)
             est$opt.cov = tmp$cov[[1]]
           }
           if (is.null(est$cov)) 
-            tmp = huge.glasso(est$data, lambda = est$opt.lambda, 
-                              verbose = FALSE)
+            tmp = huge.glasso.mc(est$data, lambda = est$opt.lambda, 
+                                 verbose = FALSE)
           est$refit = tmp$path[[1]]
           est$opt.icov = tmp$icov[[1]]
           rm(tmp)
@@ -229,33 +259,32 @@ icov.select <- function(est, criterion = 'stars', stars.thresh = 0.05, ebic.gamm
       #            for (i in 1:nlambda) merge[[i]] <- Matrix(0, d, d)
       
       #    for (i in 1:rep.num) {
-      merge <- parallel::mclapply(1:rep.num, function(i)
-      {
-        #                if (verbose) {
-        #                  mes <- paste(c("Conducting Subsampling....in progress:", 
-        #                    floor(100 * i/rep.num), "%"), collapse = "")
-        #                  cat(mes, "\r")
-        #                  flush.console()
-        #                }
-        #                merge <- replicate(nlambda, Matrix(0, d,d))
-        ind.sample = sample(c(1:n), floor(n * stars.subsample.ratio), 
-                            replace = FALSE)
-        if (est$method == "mb") 
-          tmp = huge.mb(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
-                        scr = est$scr, idx.mat = est$idx.mat, sym = est$sym, 
-                        verbose = FALSE)$path
-        if (est$method == "ct") 
-          tmp = huge.ct(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
-                        verbose = FALSE)$path
-        if (est$method == "glasso") 
-          tmp = huge.glasso(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
-                            scr = est$scr, verbose = FALSE)$path
-        #                for (j in 1:nlambda) merge[[j]] <- merge[[j]] + tmp[[j]]
-        
-        rm(ind.sample)
-        gc()
-        return(tmp)
-      }, mc.cores=ncores)
+        merge <- mclapply.pb(1:rep.num, function(i)
+        {
+          #                if (verbose) {
+          #                  mes <- paste(c("Conducting Subsampling....in progress:", 
+          #                    floor(100 * i/rep.num), "%"), collapse = "")
+          #                  cat(mes, "\r")
+          #                  flush.console()
+          #                }
+          #                merge <- replicate(nlambda, Matrix(0, d,d))
+          ind.sample = sample(c(1:n), floor(n * stars.subsample.ratio), 
+                              replace = FALSE)
+          if (est$method == "mb") 
+            tmp = huge.mb(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
+                          scr = est$scr, idx.mat = est$idx.mat, sym = est$sym, 
+                          verbose = FALSE)$path
+          if (est$method == "ct") 
+            tmp = huge.ct(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
+                          verbose = FALSE)$path
+          if (est$method == "glasso") 
+            tmp = huge.glasso.mc(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
+                                 scr = est$scr, verbose = FALSE, ncores = g.ncores, mc.progress = FALSE)$path
+          #                for (j in 1:nlambda) merge[[j]] <- merge[[j]] + tmp[[j]]
+          rm(ind.sample)
+          gc()
+          return(tmp)
+        }, mc.cores=s.ncores)
       #  }
       # merge <- lapply(merge, as.matrix)
       merge<-lapply(merge, function(x) simplify2array(lapply(x, as.matrix)) )

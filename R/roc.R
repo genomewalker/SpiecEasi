@@ -15,6 +15,7 @@ stars.roc <- function(optmerge, theta, verbose = TRUE, ll=15) {
 }
 
 #' @rdname stars.roc
+#' @export
 stars.pr <- function(optmerge, theta, verbose = TRUE, ll=15) {
     huge.pr(merge2path(optmerge, ll+1), theta, verbose)
 }

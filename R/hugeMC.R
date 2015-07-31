@@ -1,18 +1,16 @@
 # Added multicore support for glasso method
-
-
-
+#' @export
 huge.mc <- function (x, lambda = NULL, nlambda = NULL, lambda.min.ratio = NULL, 
-          method = "mb", scr = NULL, scr.num = NULL, cov.output = FALSE, 
-          sym = "or", verbose = TRUE, ncores = ncores) 
+                     method = "mb", scr = NULL, scr.num = NULL, cov.output = FALSE, 
+                     sym = "or", verbose = TRUE, ncores = 1, mc.progress = FALSE) 
 {
   gcinfo(FALSE)
   est = list()
   est$method = method
   if (method == "glasso") {
-    fit = huge.glasso(x, nlambda = nlambda, lambda.min.ratio = lambda.min.ratio, 
+    fit = huge.glasso.mc(x, nlambda = nlambda, lambda.min.ratio = lambda.min.ratio, 
                       lambda = lambda, scr = scr, cov.output = cov.output, 
-                      verbose = verbose)
+                      verbose = verbose, ncores = ncores, mc.progress = mc.progress)
     est$path = fit$path
     est$lambda = fit$lambda
     est$icov = fit$icov
@@ -35,9 +33,9 @@ huge.mc <- function (x, lambda = NULL, nlambda = NULL, lambda.min.ratio = NULL,
   return(est)
 }
 
-
+#' @export
 huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = NULL, 
-                       scr = NULL, cov.output = FALSE, verbose = TRUE, num.cores = 1) 
+                          scr = NULL, cov.output = FALSE, verbose = TRUE, ncores = 1, mc.progress = FALSE) 
 {
   gcinfo(FALSE)
   n = nrow(x)
@@ -84,26 +82,27 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
     fit$cov = list()
   }
   out.glasso = NULL
-  fit.mc<-mclapply(nlambda:1, function(i) {
+  fit1<-list()
+  fit.mc<-mclapply.pb(nlambda:1, function(i) {
     fit1$sparsity<-0
     fit1$loglik<--d
     fit1$df<-0
     z = which(rowSums(abs(S) > lambda[i]) > 1)
     q = length(z)
     if (q > 0) {
-      if (verbose) {
-        if (scr) {
-          cat(paste(c("Conducting the graphical lasso (glasso) wtih lossy screening....in progress:", 
-                      floor(100 * (1 - i/nlambda)), "%"), collapse = ""), 
-              "\r")
-        }
-        if (!scr) {
-          cat(paste(c("Conducting the graphical lasso (glasso) with lossless screening....in progress:", 
-                      floor(100 * (1 - i/nlambda)), "%"), collapse = ""), 
-              "\r")
-        }
-        flush.console()
-      }
+      #       if (verbose) {
+      #         if (scr) {
+      #           cat(paste(c("Conducting the graphical lasso (glasso) wtih lossy screening....in progress:", 
+      #                       floor(100 * (1 - i/nlambda)), "%"), collapse = ""), 
+      #               "\r")
+      #         }
+      #         if (!scr) {
+      #           cat(paste(c("Conducting the graphical lasso (glasso) with lossless screening....in progress:", 
+      #                       floor(100 * (1 - i/nlambda)), "%"), collapse = ""), 
+      #               "\r")
+      #         }
+      #         flush.console()
+      #       }
       if (scr) {
         if (!is.null(out.glasso)) {
           out.glasso = .C("hugeglassoscr",
@@ -169,7 +168,7 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
     if (cov.output) 
       fit1$cov <- Matrix(tmp.cov)
     return(fit1)
-  }, mc.cores = num.cores)
+  }, mc.cores = ncores, mc.progress = mc.progress)
   
   fit.l<-do.call(Map, c(c, fit.mc))
   fit$loglik<-rev(fit.l$loglik)
@@ -179,7 +178,7 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
   fit$icov<-rev(fit.l$icov)
   fit$cov<-rev(fit.l$cov)
   
-  rm(S, out.glasso, fit.l, lol)
+  rm(S, out.glasso, fit.l, fit.mc)
   gc()
   if (verbose) {
     cat("Conducting the graphical lasso (glasso)....done.                                          \r")
@@ -187,4 +186,70 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
     flush.console()
   }
   return(fit)
+}
+
+
+##------------------------------------------------------------------------------
+##' Wrapper around mclapply to track progress
+##' 
+##' Based on http://stackoverflow.com/questions/10984556
+##' 
+##' @param X         a vector (atomic or list) or an expressions vector. Other
+##'                  objects (including classed objects) will be coerced by
+##'                  ‘as.list’
+##' @param FUN       the function to be applied to
+##' @param ...       optional arguments to ‘FUN’
+##' @param mc.preschedule see mclapply
+##' @param mc.set.seed see mclapply
+##' @param mc.silent see mclapply
+##' @param mc.cores see mclapply
+##' @param mc.cleanup see mclapply
+##' @param mc.allow.recursive see mclapply
+##' @param mc.progress track progress?
+##' @param mc.style    style of progress bar (see txtProgressBar)
+##'
+##' @examples
+##' x <- mclapply2(1:1000, function(i, y) Sys.sleep(0.01))
+##' x <- mclapply2(1:3, function(i, y) Sys.sleep(1), mc.cores=1)
+##------------------------------------------------------------------------------
+#' @export
+mclapply.pb <- function(X, FUN, ..., 
+                      mc.preschedule = TRUE, mc.set.seed = TRUE,
+                      mc.silent = FALSE, mc.cores = getOption("mc.cores", 2L),
+                      mc.cleanup = TRUE, mc.allow.recursive = TRUE,
+                      mc.progress=TRUE, mc.style=3) 
+{
+  if (!is.vector(X) || is.object(X)) X <- as.list(X)
+  
+  if (mc.progress) {
+    f <- fifo(tempfile(), open="w+b", blocking=T)
+    p <- parallel:::mcfork()
+    pb <- txtProgressBar(0, length(X), style=mc.style)
+    setTxtProgressBar(pb, 0) 
+    progress <- 0
+    if (inherits(p, "masterProcess")) {
+      while (progress < length(X)) {
+        readBin(f, "double")
+        progress <- progress + 1
+        setTxtProgressBar(pb, progress) 
+      }
+      cat("\n")
+      parallel:::mcexit()
+    }
+  }
+  tryCatch({
+    result <- mclapply(X, function(...) {
+      res <- FUN(...)
+      if (mc.progress) writeBin(1, f)
+      res
+    }, 
+    mc.preschedule = mc.preschedule, mc.set.seed = mc.set.seed,
+    mc.silent = mc.silent, mc.cores = mc.cores,
+    mc.cleanup = mc.cleanup, mc.allow.recursive = mc.allow.recursive
+    )
+    
+  }, finally = {
+    if (mc.progress) close(f)
+  })
+  result
 }
