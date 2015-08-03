@@ -89,7 +89,7 @@ spiec.easi.default <- function(data, method='glasso', sel.criterion='stars', ver
 #'  image(as.matrix(est.log$path[[3]][1:5,1:5]))
 #'  image(as.matrix(est.clr$path[[3]][1:5,1:5]))
 #'  image(as.matrix(est.f$path[[3]][1:5,1:5]))
-sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE, ncores = 1, nlamba, ...) {
+sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE, ncores = 1, nlambda, ...) {
   if (npn) {
     message("Performing NPN transformation...")
     data <- huge::huge.npn(data, verbose=verbose)
