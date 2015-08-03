@@ -9,8 +9,8 @@ huge.mc <- function (x, lambda = NULL, nlambda = NULL, lambda.min.ratio = NULL,
   est$method = method
   if (method == "glasso") {
     fit = huge.glasso.mc(x, nlambda = nlambda, lambda.min.ratio = lambda.min.ratio, 
-                      lambda = lambda, scr = scr, cov.output = cov.output, 
-                      verbose = verbose, ncores = ncores, mc.progress = mc.progress)
+                         lambda = lambda, scr = scr, cov.output = cov.output, 
+                         verbose = verbose, ncores = ncores, mc.progress = mc.progress)
     est$path = fit$path
     est$lambda = fit$lambda
     est$icov = fit$icov
@@ -83,6 +83,12 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
   }
   out.glasso = NULL
   fit1<-list()
+  if (scr){
+    message(paste(c("Conducting the graphical lasso (glasso) wtih lossy screening....")))
+  }
+  if (!scr){
+    message(paste(c("Conducting the graphical lasso (glasso) with lossless screening....")))
+  }
   fit.mc<-mclapply.pb(nlambda:1, function(i) {
     fit1$sparsity<-0
     fit1$loglik<--d
@@ -214,10 +220,10 @@ huge.glasso.mc<-function (x, lambda = NULL, lambda.min.ratio = NULL, nlambda = N
 ##------------------------------------------------------------------------------
 #' @export
 mclapply.pb <- function(X, FUN, ..., 
-                      mc.preschedule = TRUE, mc.set.seed = TRUE,
-                      mc.silent = FALSE, mc.cores = getOption("mc.cores", 2L),
-                      mc.cleanup = TRUE, mc.allow.recursive = TRUE,
-                      mc.progress=TRUE, mc.style=3) 
+                        mc.preschedule = TRUE, mc.set.seed = TRUE,
+                        mc.silent = FALSE, mc.cores = getOption("mc.cores", 2L),
+                        mc.cleanup = TRUE, mc.allow.recursive = TRUE,
+                        mc.progress=TRUE, mc.style=3) 
 {
   if (!is.vector(X) || is.object(X)) X <- as.list(X)
   

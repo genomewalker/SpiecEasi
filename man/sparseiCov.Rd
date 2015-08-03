@@ -5,7 +5,7 @@
 \title{Sparse/penalized estimators of covariance matrices}
 \usage{
 sparseiCov(data, method, npn = FALSE, verbose = FALSE, cov.output = TRUE,
-  ncores = 1, nlamba, ...)
+  ncores = 1, nlambda, ...)
 }
 \arguments{
 \item{data}{data matrix with features/OTUs in the columns and samples in the rows. Should be transformed by clr for meaningful results, if the data is compositional}
