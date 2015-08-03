@@ -22,21 +22,22 @@ spiec.easi.phyloseq <- function(obj, ...) {
 #' @param method estimation method to use as a character string. Currently either 'glasso' or 'mb' (meinshausen-buhlmann)
 #' @param sel.criterion character string specifying criterion/method for model selection accepts 'stars' [default], 'ric', 'ebic'
 #' @param icov.select.params list of further arguments to icov.select
+#' @param pseudocount integer specifying the pseudocount value. The default value is 1
 #' @param ... further arguments to sparseiCov
 #' @method spiec.easi default
 #' @export
 spiec.easi.default <- function(data, method='glasso', sel.criterion='stars', verbose=TRUE, 
-                               icov.select=TRUE, icov.select.params=list(), ...) {
+                               icov.select=TRUE, ncores = 1, pseudocount = 1, icov.select.params=list(), ...) {
   
   args <- list(...)
-  if (verbose) message("Normalizing/clr transformation of data with pseudocount")
-  data.clr <- t(clr(data+1, 1))
-  if (verbose) message(paste("Inverse Covariance Estimation with", method, "...", sep=" "))
-  est      <- do.call('sparseiCov', c(list(data=data.clr, method=method), args))
+  if (verbose) message("Normalizing/clr transformation of data with pseudocount...")
+  data.clr <- t(clr(data+pseudocount, 1))
+  if (verbose) message(paste("Inverse Covariance Estimation with ", method, "...", sep=""))
+  est      <- do.call('sparseiCov', c(list(data=data.clr, method=method, ncores=ncores), args))
   
   if (icov.select) {
-    if (verbose) message(paste("Model selection with", sel.criterion, "...", sep=" "))
-    est <- do.call('icov.select', c(list(est=est, criterion=sel.criterion), icov.select.params))
+    if (verbose) message(paste("Model selection with ", sel.criterion, "...", sep=""))
+    est <- do.call('icov.select', c(list(est=est, criterion=sel.criterion, ncores=ncores), icov.select.params))
     if (verbose) message("Done!")
   }
   return(est)
@@ -54,6 +55,7 @@ spiec.easi.default <- function(data, method='glasso', sel.criterion='stars', ver
 #' @param method estimation method to use as a character string. Currently either 'glasso' or 'mb' (meinshausen-buhlmann)
 #' @param npn perform Nonparanormal (npn) transformation before estimation?
 #' @param verbose print progress to standard out
+#' @param ncores number of cores to use. Need multiple processers if \code{ncores > 1}
 #' @param ... further arguments to huge/estimation functions. See details.
 #' @details
 #' This is a wrapper function for sparse iCov estimations performed by glasso in the huge package.
@@ -87,20 +89,36 @@ spiec.easi.default <- function(data, method='glasso', sel.criterion='stars', ver
 #'  image(as.matrix(est.log$path[[3]][1:5,1:5]))
 #'  image(as.matrix(est.clr$path[[3]][1:5,1:5]))
 #'  image(as.matrix(est.f$path[[3]][1:5,1:5]))
-sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE, ...) {
-  
-  if (npn) data <- huge::huge.npn(data, verbose=verbose)
-  
+sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE, ncores = 1, nlamba, ...) {
+  if (npn) {
+    message("Performing NPN transformation...")
+    data <- huge::huge.npn(data, verbose=verbose)
+  }
   args <- list(...)
   
   method <- switch(method, glasso = "glasso", mb = "mb",
                    stop("Method not supported"))
   
   if (is.null(args$lambda.min.ratio)) args$lambda.min.ratio <- 1e-3
+  # Avoid to run more processes than cores available
+  num.cores<-detectCores()
+  if (ncores > num.cores) {
+    ncores<-num.cores
+    message((paste("Note: Detected ", num.cores, " cores. Reduced the number of cores to ", ncores, ".", sep = "")))
+    message(paste("Using", ncores, "cores for regularization/thresholding parameters."))
+    
+  }else{
+    if (ncores >= nlambda){
+      ncores<-nlambda
+      message(paste("Detected", num.cores, "cores. Using", ncores, "cores for regularization/thresholding parameters."))
+    }else{
+      message(paste("Detected", num.cores, "cores. Using", ncores, "cores for regularization/thresholding parameters."))
+    }
+  }
   
   if (method %in% c("glasso")) {
-    do.call(huge::huge, c(args, list(x=data, method=method, verbose=verbose, 
-                                     cov.output = cov.output)))
+    do.call(huge.mc, c(args, list(x=data, method=method, 
+                                  cov.output = cov.output, ncores = ncores, mc.progress = TRUE)))
     
   } else if (method %in% c('mb')) {
     est <- do.call(huge::huge.mb, c(args, list(x=data, verbose=verbose)))
@@ -128,6 +146,29 @@ sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE
 #' @export
 icov.select <- function(est, criterion = 'stars', stars.thresh = 0.05, ebic.gamma = 0.5, 
                         stars.subsample.ratio = NULL, rep.num = 20, ncores=1, normfun=function(x) x, verbose=FALSE) {
+  # Balance cores to be used for stars and huge.glasso.mc
+  # Avoid to run more processes than cores available
+  num.cores<-detectCores()
+  if (ncores > num.cores) {
+    ncores<-num.cores
+    message((paste("Note: Detected ", num.cores, " cores. Reduced the number of cores to ", ncores, ".", sep = "")))
+  }else{
+    message(paste("Detected", num.cores, "cores. Using", ncores, "cores"))
+  }
+  
+  # Naively distribute the cores for the stars and glasso
+  if (ncores == 2){
+    s.ncores <- 1
+    g.ncores <- 2
+  }else if (ncores == 3){
+    s.ncores <- 1
+    g.ncores <- 3
+  }else{
+    s.ncores<-floor(sqrt(ncores))
+    g.ncores<-ceiling(sqrt(ncores))
+  }
+  message(paste("Using", s.ncores, "cores for stars selection and", g.ncores, "cores for glasso estimation."))
+  
   gcinfo(FALSE)
   if (est$cov.input) {
     cat("Model selection is not available when using the covariance matrix as input.")
@@ -177,13 +218,13 @@ icov.select <- function(est, criterion = 'stars', stars.thresh = 0.05, ebic.gamm
                               sym = est$sym, idx.mat = est$idx.mat, verbose = FALSE)$path[[1]]
         if (est$method == "glasso") {
           if (!is.null(est$cov)) {
-            tmp = huge.glasso(est$data, lambda = est$opt.lambda, 
-                              scr = est$scr, cov.output = TRUE, verbose = FALSE)
+            tmp = huge.glasso.mc(est$data, lambda = est$opt.lambda, 
+                                 scr = est$scr, cov.output = TRUE, verbose = FALSE)
             est$opt.cov = tmp$cov[[1]]
           }
           if (is.null(est$cov)) 
-            tmp = huge.glasso(est$data, lambda = est$opt.lambda, 
-                              verbose = FALSE)
+            tmp = huge.glasso.mc(est$data, lambda = est$opt.lambda, 
+                                 verbose = FALSE)
           est$refit = tmp$path[[1]]
           est$opt.icov = tmp$icov[[1]]
           rm(tmp)
@@ -229,7 +270,7 @@ icov.select <- function(est, criterion = 'stars', stars.thresh = 0.05, ebic.gamm
       #            for (i in 1:nlambda) merge[[i]] <- Matrix(0, d, d)
       
       #    for (i in 1:rep.num) {
-      merge <- parallel::mclapply(1:rep.num, function(i)
+      merge <- mclapply.pb(1:rep.num, function(i)
       {
         #                if (verbose) {
         #                  mes <- paste(c("Conducting Subsampling....in progress:", 
@@ -248,31 +289,25 @@ icov.select <- function(est, criterion = 'stars', stars.thresh = 0.05, ebic.gamm
           tmp = huge.ct(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
                         verbose = FALSE)$path
         if (est$method == "glasso") 
-          tmp = huge.glasso(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
-                            scr = est$scr, verbose = FALSE)$path
+          tmp = huge.glasso.mc(normfun(est$data[ind.sample, ]), lambda = est$lambda, 
+                               scr = est$scr, verbose = FALSE, ncores = g.ncores, mc.progress = FALSE)$path
         #                for (j in 1:nlambda) merge[[j]] <- merge[[j]] + tmp[[j]]
-        
         rm(ind.sample)
         gc()
         return(tmp)
-      }, mc.cores=ncores)
+      }, mc.cores=s.ncores)
       #  }
       # merge <- lapply(merge, as.matrix)
-      merge<-lapply(merge, function(x) simplify2array(lapply(x, as.matrix)) )
-      merge<-Reduce("+",merge)
-      est$merge <- lapply(1:dim(merge)[3], function(i) merge[,,i])
+      est$merge<-lapply(do.call(Map, c(c, merge)), function(x) Reduce("+",x)/rep.num)
+      
       if (verbose) {
-        mes = "Conducting Subsampling....done.                 "
+        mes = "Conducting Subsampling....done."
         cat(mes, "\r")
         cat("\n")
         flush.console()
       }
-      est$variability = rep(0, nlambda)
-      for (i in 1:nlambda) {
-        est$merge[[i]] = est$merge[[i]]/rep.num
-        est$variability[i] = 4 * sum(est$merge[[i]] * 
-                                       (1 - est$merge[[i]]))/(d * (d - 1))
-      }
+      est$variability<-simplify2array(lapply(est$merge, function(x) 4 * sum(x * (1-x))/(d * (d-1))))
+      
       est$opt.index = max(which.max(est$variability >= 
                                       stars.thresh)[1] - 1, 1)
       est$refit = est$path[[est$opt.index]]

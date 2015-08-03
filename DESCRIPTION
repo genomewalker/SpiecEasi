@@ -12,11 +12,11 @@ Depends:
  huge (>= 1.2.6),
  MASS,
  VGAM,
- Matrix
+ Matrix,
+ parallel
 Suggests: 
- parallel,
  boot,
  phyloseq,
-  testthat
+ testthat
 License: getOptions('devtools.desc.license')
 LazyData: true
