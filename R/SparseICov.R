@@ -89,7 +89,7 @@ spiec.easi.default <- function(data, method='glasso', sel.criterion='stars', ver
 #'  image(as.matrix(est.log$path[[3]][1:5,1:5]))
 #'  image(as.matrix(est.clr$path[[3]][1:5,1:5]))
 #'  image(as.matrix(est.f$path[[3]][1:5,1:5]))
-sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE, ncores = 1, nlambda, ...) {
+sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE, ncores = 1, nlambda = 20, ...) {
   if (npn) {
     message("Performing NPN transformation...")
     data <- huge::huge.npn(data, verbose=verbose)
@@ -100,6 +100,7 @@ sparseiCov <- function(data, method, npn=FALSE, verbose=FALSE, cov.output = TRUE
                    stop("Method not supported"))
   
   if (is.null(args$lambda.min.ratio)) args$lambda.min.ratio <- 1e-3
+  if (!is.null(args$lamda)) nlambda<-length(args$lambda)
   # Avoid to run more processes than cores available
   num.cores<-detectCores()
   if (ncores > num.cores) {
@@ -157,15 +158,40 @@ icov.select <- function(est, criterion = 'stars', stars.thresh = 0.05, ebic.gamm
   }
   
   # Naively distribute the cores for the stars and glasso
+  # Maximise stars selection core usage
   if (ncores == 2){
-    s.ncores <- 1
-    g.ncores <- 2
+    s.ncores <- 2
+    g.ncores <- 1
   }else if (ncores == 3){
-    s.ncores <- 1
-    g.ncores <- 3
+    s.ncores <- 3
+    g.ncores <- 1
   }else{
-    s.ncores<-floor(sqrt(ncores))
-    g.ncores<-ceiling(sqrt(ncores))
+    ncores<-20
+    nlambda<-20
+    if (ncores >= nlambda){
+      #how many cores we have if we try to compute all nlambdas
+      ncores.dif<-ncores-nlambda
+      i<-1
+      while ((nlambda * i) <= ncores){ 
+        i<-i+1
+      }
+      s.ncores<-nlambda
+      g.ncores<-i-1
+    }else{
+      s.ncores<-ceiling(sqrt(ncores))
+      i<-1
+      while ((s.ncores * i) <= ncores){ 
+        i<-i+1
+      }
+      g.ncores<-i-1  
+      i<-0
+      while ((s.ncores * g.ncores) <= ncores){ 
+        s.ncores<-s.ncores+1
+      }
+      s.ncores<-s.ncores-1
+    }
+    s.ncores
+    g.ncores
   }
   message(paste("Using", s.ncores, "cores for stars selection and", g.ncores, "cores for glasso estimation."))
   
